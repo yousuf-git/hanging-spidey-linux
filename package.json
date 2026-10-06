@@ -1,0 +1,15 @@
+{
+  "name": "hanging-spidey",
+  "version": "1.0.0",
+  "description": "Miles Morales desktop mascot that hangs from a web and swings",
+  "scripts": {
+    "dev": "python3 -m http.server 8765 --bind 127.0.0.1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "three": "^0.186.1"
+  }
+}

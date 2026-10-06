@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Hanging Spidey</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+        user-select: none;
+      }
+      canvas {
+        position: fixed;
+        inset: 0;
+        display: block;
+      }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "../node_modules/three/build/three.module.js",
+          "three/addons/": "../node_modules/three/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <canvas id="layer-back"></canvas>
+    <canvas id="layer-gl"></canvas>
+    <canvas id="layer-front"></canvas>
+    <script>
+      // Forward page errors to the host log (visible with run.sh --debug).
+      const report = (msg) => window.webkit?.messageHandlers?.spidey?.postMessage(JSON.stringify({ type: "log", msg }));
+      window.addEventListener("error", (e) => report(`error: ${e.message} @ ${e.filename}:${e.lineno}`));
+      window.addEventListener("unhandledrejection", (e) => report(`rejection: ${e.reason?.stack || e.reason}`));
+    </script>
+    <script src="web.js"></script>
+    <script type="module" src="app.js" onerror="report('failed to load app.js')"></script>
+  </body>
+</html>

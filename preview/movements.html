@@ -1,0 +1,1062 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Spidey Movement Preview</title>
+<style>
+  :root {
+    --bg: #0b0d12;
+    --panel: #171b24;
+    --edge: #2c3342;
+    --text: #e6e2d6;
+    --muted: #8b93a3;
+    --red: #e10600;
+    --cyan: #3de0ff;
+    --magenta: #ff3d8b;
+    --amber: #e8a317;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.45 "IBM Plex Sans", system-ui, sans-serif;
+    padding: 18px clamp(12px, 3vw, 28px) 32px;
+  }
+  h1 { margin: 0 0 4px; font-size: 1.35rem; letter-spacing: 0.02em; }
+  header p { margin: 0 0 14px; color: var(--muted); max-width: 80ch; }
+  .layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start; }
+  @media (max-width: 1000px) { .layout { grid-template-columns: 1fr; } }
+  .stage { position: relative; background: #05060a; border: 1px solid var(--edge); border-radius: 6px; padding: 8px; }
+  #world { display: block; width: 100%; cursor: grab; touch-action: none; }
+  #world.dragging { cursor: grabbing; }
+  .row2 { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 12px; margin-top: 12px; }
+  @media (max-width: 760px) { .row2 { grid-template-columns: 1fr; } }
+  .cam { background: #05060a; border: 1px solid var(--edge); border-radius: 6px; padding: 8px; }
+  #closeup { display: block; width: 100%; aspect-ratio: 1; cursor: grab; touch-action: none; }
+  .label { font: 11px/1 ui-monospace, monospace; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin: 2px 2px 8px; }
+  aside { background: var(--panel); border: 1px solid var(--edge); border-radius: 6px; padding: 14px; display: flex; flex-direction: column; gap: 14px; }
+  .status { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font: 12px ui-monospace, monospace; }
+  .status b { color: var(--muted); font-weight: 500; }
+  .status span { color: var(--amber); }
+  fieldset { border: 1px solid var(--edge); border-radius: 4px; margin: 0; padding: 8px 10px 10px; }
+  legend { padding: 0 4px; color: var(--muted); font-size: 12px; }
+  label.opt { display: flex; gap: 8px; align-items: center; margin: 4px 0; cursor: pointer; }
+  select { width: 100%; background: #0f1219; color: var(--text); border: 1px solid var(--edge); border-radius: 3px; padding: 4px; }
+  .moves { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  button { background: #0f1219; color: var(--text); border: 1px solid var(--edge); border-radius: 3px; padding: 6px 6px; font-size: 12px; cursor: pointer; text-align: left; }
+  button:hover:not(:disabled) { border-color: var(--red); }
+  button:disabled { opacity: 0.35; cursor: not-allowed; }
+  button.primary { background: var(--red); border-color: var(--red); color: #fff; grid-column: 1 / -1; text-align: center; }
+  #log { margin: 0; padding: 0; list-style: none; font: 12px ui-monospace, monospace; color: var(--muted); max-height: 220px; overflow: auto; }
+  #log li { padding: 2px 0; border-bottom: 1px dashed #222838; }
+  #log li:first-child { color: var(--text); }
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .legend i { display: inline-block; width: 18px; height: 3px; vertical-align: middle; margin-right: 6px; }
+  .notes { font-size: 12.5px; color: var(--muted); }
+  .notes li { margin-bottom: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Spidey movement preview</h1>
+  <p>
+    Behaviour mock-up on your real layout (two 1920×1080 monitors, top bar and left dock on monitor 1).
+    The figure is a stand-in for the 3D Miles. He idles quietly, then makes one big move after a random
+    delay. Drag him with the mouse anywhere (overview or close-up), or trigger moves from the panel.
+  </p>
+</header>
+
+<div class="layout">
+  <div>
+    <div class="stage">
+      <div class="label">Overview · both monitors</div>
+      <canvas id="world"></canvas>
+      <div class="legend">
+        <span><i style="background:var(--cyan)"></i>ceiling</span>
+        <span><i style="background:var(--magenta)"></i>walls</span>
+        <span><i style="background:var(--amber)"></i>ground</span>
+        <span><i style="background:#8b93a3"></i>monitor edge (dashed = passable)</span>
+      </div>
+    </div>
+    <div class="row2">
+      <div class="cam">
+        <div class="label">Close-up camera · real size</div>
+        <canvas id="closeup"></canvas>
+      </div>
+      <div class="cam notes">
+        <div class="label">What you're seeing</div>
+        <ul>
+          <li><b>Idle:</b> breathing, glancing around, slow sway on the line — no travel.</li>
+          <li><b>Big move:</b> one at a time after a random wait (see “Next big move”).</li>
+          <li><b>Drag:</b> he dangles from the cursor on a short web. Drop near a wall/ceiling → he sticks; in open space → he falls and lands.</li>
+          <li><b>Clickable area:</b> only the dashed box around him blocks clicks; web, net and empty space pass clicks through.</li>
+          <li><b>Monitors:</b> with roaming off he stays on one screen (the inner edge acts as a wall) until you drag him across or press “Send to other monitor”.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <aside>
+    <div class="status">
+      <b>State</b><span id="st-state">–</span>
+      <b>Doing</b><span id="st-doing">–</span>
+      <b>Monitor</b><span id="st-mon">–</span>
+      <b>Next big move</b><span id="st-next">–</span>
+    </div>
+
+    <fieldset>
+      <legend>Pacing</legend>
+      <label class="label" for="activity" style="margin:4px 0">Activity</label>
+      <select id="activity">
+        <option value="calm">Calm — big move every 1–3 min</option>
+        <option value="normal">Normal — every 30–90 s</option>
+        <option value="playful">Playful — every 10–40 s</option>
+      </select>
+      <label class="label" for="waitscale" style="margin:10px 0 4px">Preview wait speed</label>
+      <select id="waitscale">
+        <option value="1">Real time</option>
+        <option value="10" selected>10× faster waits</option>
+        <option value="30">30× faster waits</option>
+      </select>
+    </fieldset>
+
+    <fieldset>
+      <legend>Options</legend>
+      <label class="opt"><input type="checkbox" id="roam" /> Roam both monitors on his own</label>
+      <label class="opt"><input type="checkbox" id="hit" checked /> Show clickable area</label>
+    </fieldset>
+
+    <fieldset>
+      <legend>Trigger a move</legend>
+      <div class="moves" id="moves"></div>
+    </fieldset>
+
+    <div>
+      <div class="label">Log</div>
+      <ul id="log"></ul>
+    </div>
+  </aside>
+</div>
+
+<script>
+(() => {
+  // ——— World: your layout in real pixels ———
+  const W = 3840, H = 1080, GROUND = 1080;
+  const MONS = [
+    { x: 0, w: 1920, top: 27, left: 59, name: "1 (primary)" },
+    { x: 1920, w: 1920, top: 0, left: 0, name: "2" },
+  ];
+  const monOf = (x) => (x < 1920 ? 0 : 1);
+  const ceilAt = (x) => MONS[monOf(x)].top;
+  const ACTIVITY = { calm: [60, 180], normal: [30, 90], playful: [10, 40] };
+  const opt = { roam: false, hit: true, activity: "calm", waitScale: 10 };
+
+  function walls(x = fig.x) {
+    if (opt.roam) return { l: 59, r: W };
+    return monOf(x) === 0 ? { l: 59, r: 1920 } : { l: 1920, r: W };
+  }
+
+  // ——— Figure rig (world px, ~200 tall) ———
+  const R = { spine: 62, neck: 8, head: 16, upper: 36, fore: 32, thigh: 48, shin: 46, sh: 16, hip: 9 };
+  const STAND = 88; // pelvis above ground when standing
+  const OFF = 34; // pelvis distance from a wall/ceiling when crawling
+  const G = 1800;
+
+  // ——— Vector helpers ———
+  const v = (x, y) => ({ x, y });
+  const add = (a, b) => v(a.x + b.x, a.y + b.y);
+  const sub = (a, b) => v(a.x - b.x, a.y - b.y);
+  const mul = (a, k) => v(a.x * k, a.y * k);
+  const len = (a) => Math.hypot(a.x, a.y);
+  const norm = (a) => { const l = len(a) || 1; return v(a.x / l, a.y / l); };
+  const dot = (a, b) => a.x * b.x + a.y * b.y;
+  const rot = (a, t) => v(a.x * Math.cos(t) - a.y * Math.sin(t), a.x * Math.sin(t) + a.y * Math.cos(t));
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+  const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+  const lerpAngle = (a, b, t) => a + wrap(b - a) * t;
+
+  // ——— Figure state ———
+  const fig = {
+    x: 1100, y: 400, th: Math.PI,
+    surface: "line", // line | ceiling | wallL | wallR | ground | air | drag
+    phase: 0, moving: false, crouch: 0, look: 0,
+    vx: 0, vy: 0,
+    rope: null, // { ax, ay, len, ang, vel, grip: "feet" | "hand" }
+    blend: 1, blendFrom: null,
+    shot: null, // web being fired { from, to, t }
+    solved: null,
+  };
+
+  function joints() {
+    const up = v(Math.sin(fig.th), -Math.cos(fig.th));
+    const right = v(Math.cos(fig.th), Math.sin(fig.th));
+    const P = v(fig.x, fig.y);
+    const C = add(P, mul(up, R.spine));
+    const Hd = add(C, mul(up, R.neck + R.head));
+    return {
+      up, right, P, C, Hd,
+      shL: add(C, mul(right, -R.sh)), shR: add(C, mul(right, R.sh)),
+      hpL: add(P, mul(right, -R.hip)), hpR: add(P, mul(right, R.hip)),
+    };
+  }
+
+  function ik(A, T, l1, l2, prefer) {
+    let d = sub(T, A);
+    let dist = len(d);
+    const max = l1 + l2 - 0.5;
+    if (dist > max) { d = mul(norm(d), max); dist = max; }
+    dist = Math.max(dist, Math.abs(l1 - l2) + 1);
+    const dn = norm(d);
+    const a = Math.acos(clamp((l1 * l1 + dist * dist - l2 * l2) / (2 * l1 * dist), -1, 1));
+    const m1 = add(A, mul(rot(dn, a), l1));
+    const m2 = add(A, mul(rot(dn, -a), l1));
+    const M = dot(sub(m1, A), prefer) >= dot(sub(m2, A), prefer) ? m1 : m2;
+    return { A, M, E: add(A, mul(dn, dist)) };
+  }
+
+  /** A limb with no target hangs toward the floor, a little outward. */
+  function freeTarget(A, outward, reach, swing = 0) {
+    const d = norm(add(add(v(0, 0.85), mul(outward, 0.4)), v(swing, 0)));
+    return add(A, mul(d, reach * 0.9));
+  }
+
+  // ——— Rope (line hang, zip, drag) ———
+  const ropeGrip = (r) => v(r.ax + Math.sin(r.ang) * r.len, r.ay + Math.cos(r.ang) * r.len);
+
+  function poseFromRope(r) {
+    const Gp = ropeGrip(r);
+    const down = v(Math.sin(r.ang), Math.cos(r.ang));
+    if (r.grip === "feet") {
+      const th = Math.atan2(down.x, -down.y); // head points away from the anchor
+      const P = add(Gp, mul(down, 84));
+      return { x: P.x, y: P.y, th, G: Gp };
+    }
+    const upv = mul(down, -1);
+    const th = Math.atan2(upv.x, -upv.y);
+    const right = v(Math.cos(th), Math.sin(th));
+    const P = add(add(Gp, mul(down, 58 + R.spine)), mul(right, -12));
+    return { x: P.x, y: P.y, th, G: Gp };
+  }
+
+  function ropePhysics(r, dt, extra = 0) {
+    const acc = -(G / r.len) * Math.sin(r.ang) + extra;
+    r.vel += acc * dt;
+    r.vel *= Math.pow(0.996, dt * 60);
+    r.ang += r.vel * dt;
+  }
+
+  // ——— Surfaces for the crawl/walk gait ———
+  function surfaceFor(name) {
+    const w = walls();
+    const up = v(Math.sin(fig.th), -Math.cos(fig.th));
+    switch (name) {
+      case "ceiling": return { proj: (p) => v(p.x, ceilAt(p.x)), n: v(0, 1), d: up };
+      case "wallL": return { proj: (p) => v(w.l, p.y), n: v(1, 0), d: up };
+      case "wallR": return { proj: (p) => v(w.r, p.y), n: v(-1, 0), d: up };
+      default: return { proj: (p) => v(p.x, GROUND), n: v(0, -1), d: v(Math.sign(Math.sin(fig.th)) || fig.dirX || 1, 0) };
+    }
+  }
+
+  function gaitTargets(J, surf, limbs) {
+    const stride = 46, lift = 16, s = 0.7;
+    const offs = { aL: 0, lR: 0, aR: 0.5, lL: 0.5 };
+    const bias = { aL: 14, aR: 14, lL: -14, lR: -14 };
+    const roots = { aL: J.shL, aR: J.shR, lL: J.hpL, lR: J.hpR };
+    const out = {};
+    for (const k of limbs) {
+      let p = (fig.phase + offs[k]) % 1;
+      if (p < 0) p += 1;
+      const rel = p < s ? lerp(0.35, -0.35, p / s) : lerp(-0.35, 0.35, (p - s) / (1 - s));
+      const lf = p < s ? 0 : Math.sin((Math.PI * (p - s)) / (1 - s)) * lift;
+      const base = surf.proj(roots[k]);
+      out[k] = add(add(base, mul(surf.d, bias[k] + rel * stride)), mul(surf.n, lf));
+    }
+    return out;
+  }
+
+  // ——— Per-frame pose: place body (line/drag) and solve limbs ———
+  let time = 0;
+
+  function solvePose() {
+    if ((fig.surface === "line" || fig.surface === "drag") && fig.rope) {
+      const p = poseFromRope(fig.rope);
+      if (fig.blend < 1 && fig.blendFrom) {
+        const b = ease(fig.blend);
+        fig.x = lerp(fig.blendFrom.x, p.x, b);
+        fig.y = lerp(fig.blendFrom.y, p.y, b);
+        fig.th = lerpAngle(fig.blendFrom.th, p.th, b);
+      } else {
+        fig.x = p.x; fig.y = p.y; fig.th = p.th;
+      }
+    }
+
+    const J = joints();
+    const T = { aL: null, aR: null, lL: null, lR: null };
+    const s = fig.surface;
+
+    if (s === "ceiling" || s === "wallL" || s === "wallR") {
+      Object.assign(T, gaitTargets(J, surfaceFor(s), ["aL", "aR", "lL", "lR"]));
+    } else if (s === "ground") {
+      if (fig.moving) Object.assign(T, gaitTargets(J, surfaceFor("ground"), ["lL", "lR"]));
+      else { T.lL = v(J.hpL.x - 4, GROUND); T.lR = v(J.hpR.x + 4, GROUND); }
+      if (fig.crouch > 0.5) { T.aL = v(fig.x - 26, GROUND); T.aR = v(fig.x + 26, GROUND); }
+    } else if ((s === "line" || s === "drag") && fig.rope) {
+      const Gp = ropeGrip(fig.rope);
+      if (fig.rope.grip === "feet") { T.lL = add(Gp, mul(J.right, -4)); T.lR = add(Gp, mul(J.right, 4)); }
+      else T.aR = Gp;
+    }
+
+    const swing = fig.moving && s === "ground" ? Math.sin(fig.phase * Math.PI * 2) * 0.35 : 0;
+    const air = s === "air";
+    const limbs = {
+      aL: [J.shL, R.upper, R.fore, mul(J.right, -1), swing],
+      aR: [J.shR, R.upper, R.fore, J.right, -swing],
+      lL: [J.hpL, R.thigh, R.shin, mul(J.right, -1), 0],
+      lR: [J.hpR, R.thigh, R.shin, J.right, 0],
+    };
+    fig.solved = {};
+    for (const [k, [A, l1, l2, out, sw]] of Object.entries(limbs)) {
+      let tgt = T[k];
+      if (!tgt) {
+        const o = air ? add(out, mul(J.up, k[0] === "a" ? 1.2 : -0.2)) : out;
+        tgt = freeTarget(A, o, l1 + l2, sw);
+      }
+      fig.solved[k] = ik(A, tgt, l1, l2, add(out, k[0] === "l" ? mul(J.up, -0.1) : v(0, 0)));
+    }
+    fig.J = J;
+  }
+
+  // ——— Jobs (big moves) as generators: `const dt = yield;` each frame ———
+  let job = null;
+  let nextIn = 8;
+
+  function* wait(sec) { let t = 0; while (t < sec) t += yield; }
+  function* tween(sec, fn) { let t = 0; fn(0); while (t < sec) { t += yield; fn(Math.min(1, t / sec)); } }
+
+  function snapshot() { return { x: fig.x, y: fig.y, th: fig.th }; }
+
+  function* moveAlong(axis, to, speed) {
+    // axis "x" (ground/ceiling) or "y" (walls); advances the gait phase.
+    fig.moving = true;
+    while (Math.abs(to - fig[axis]) > 1) {
+      const dt = yield;
+      const step = Math.min(Math.abs(to - fig[axis]), speed * dt);
+      const sgn = Math.sign(to - fig[axis]);
+      fig[axis] += sgn * step;
+      const up = v(Math.sin(fig.th), -Math.cos(fig.th));
+      const facing = fig.surface === "ground" ? fig.dirX || 1 : axis === "x" ? Math.sign(up.x) || 1 : Math.sign(up.y) || 1;
+      fig.phase += (step / 46) * (facing === sgn ? 1 : -1);
+      if (fig.surface === "ceiling") fig.y = lerp(fig.y, ceilAt(fig.x) + OFF, Math.min(1, dt * 6));
+    }
+    fig.moving = false;
+  }
+
+  function* walkTo(x, speed = 170) {
+    fig.surface = "ground";
+    fig.dirX = Math.sign(x - fig.x) || 1;
+    yield* tween(0.15, (t) => { fig.th = lerpAngle(fig.th, 0, t); });
+    // facing on ground is carried by dirX (front view); gait direction uses it
+    yield* moveAlong("x", x, speed);
+  }
+
+  function* crawlCeiling(x) {
+    fig.surface = "ceiling";
+    const dir = Math.sign(x - fig.x) || 1;
+    const th = dir > 0 ? Math.PI / 2 : -Math.PI / 2;
+    if (Math.abs(wrap(fig.th - th)) > 0.1) yield* tween(0.35, (t) => { fig.th = lerpAngle(fig.th, th, t); });
+    yield* moveAlong("x", x, 120);
+  }
+
+  function* crawlWall(y) {
+    const dir = Math.sign(y - fig.y) || -1;
+    const th = dir < 0 ? 0 : Math.PI; // head in travel direction
+    if (Math.abs(wrap(fig.th - th)) > 0.1) yield* tween(0.45, (t) => { fig.th = lerpAngle(fig.th, th, t); });
+    yield* moveAlong("y", y, 110);
+  }
+
+  function nearestWall() {
+    const w = walls();
+    return fig.x - w.l < w.r - fig.x ? "wallL" : "wallR";
+  }
+
+  function wallX(side) { const w = walls(); return side === "wallL" ? w.l + OFF : w.r - OFF; }
+
+  // Ceiling → wall around the inside corner (ends head-down on the wall).
+  function* ceilingToWall() {
+    const side = nearestWall();
+    const w = walls();
+    const cornerX = side === "wallL" ? w.l + 70 : w.r - 70;
+    yield* crawlCeiling(cornerX);
+    const from = snapshot();
+    const toPos = v(wallX(side), ceilAt(fig.x) + 70);
+    yield* tween(0.7, (t) => {
+      const e = ease(t);
+      fig.x = lerp(from.x, toPos.x, e);
+      fig.y = lerp(from.y, toPos.y, e);
+      fig.th = lerpAngle(from.th, Math.PI, e);
+      fig.surface = t < 0.5 ? "ceiling" : side;
+    });
+    fig.surface = side;
+    yield* crawlWall(rand(ceilAt(fig.x) + 200, GROUND - 260));
+  }
+
+  // Wall → ceiling: climb to the top corner and roll onto the ceiling.
+  function* wallToCeiling() {
+    const side = fig.surface;
+    yield* crawlWall(ceilAt(fig.x) + 70);
+    const from = snapshot();
+    const w = walls();
+    const toPos = v(side === "wallL" ? w.l + 70 : w.r - 70, ceilAt(fig.x) + OFF);
+    const th = side === "wallL" ? Math.PI / 2 : -Math.PI / 2;
+    yield* tween(0.7, (t) => {
+      const e = ease(t);
+      fig.x = lerp(from.x, toPos.x, e);
+      fig.y = lerp(from.y, toPos.y, e);
+      fig.th = lerpAngle(from.th, th, e);
+      fig.surface = t < 0.5 ? side : "ceiling";
+    });
+    fig.surface = "ceiling";
+    const w2 = walls();
+    yield* crawlCeiling(rand(w2.l + 200, w2.r - 200));
+  }
+
+  function* wallToGround() {
+    const side = fig.surface;
+    yield* crawlWall(GROUND - 120);
+    const from = snapshot();
+    const w = walls();
+    const toX = side === "wallL" ? w.l + 110 : w.r - 110;
+    yield* hop(from, v(toX, GROUND - STAND), 0.6, 120);
+    yield* land();
+  }
+
+  /** Arc jump between two pelvis positions, rotating toward upright. */
+  function* hop(from, to, sec, height, endTh = 0) {
+    fig.surface = "air";
+    yield* tween(sec, (t) => {
+      const e = ease(t);
+      fig.x = lerp(from.x, to.x, e);
+      fig.y = lerp(from.y, to.y, e) - Math.sin(Math.PI * t) * height;
+      fig.th = lerpAngle(from.th, endTh, e);
+    });
+  }
+
+  function* land() {
+    fig.surface = "ground";
+    fig.th = 0;
+    yield* tween(0.18, (t) => { fig.crouch = t; fig.y = GROUND - lerp(STAND, 60, t); });
+    yield* wait(0.25);
+    yield* tween(0.3, (t) => { fig.crouch = 1 - t; fig.y = GROUND - lerp(60, STAND, t); });
+    fig.crouch = 0;
+  }
+
+  function* groundToWall() {
+    const side = nearestWall();
+    const w = walls();
+    const runTo = side === "wallL" ? w.l + 260 : w.r - 260;
+    yield* walkTo(runTo, 320);
+    const from = snapshot();
+    const to = v(wallX(side), GROUND - 330);
+    yield* hop(from, to, 0.55, 90);
+    fig.surface = side;
+    yield* crawlWall(rand(ceilAt(fig.x) + 220, GROUND - 300));
+  }
+
+  // Fire a web to the ceiling and get pulled up into a one-hand hang.
+  function* zipUp() {
+    const ax = clamp(fig.x + (Math.random() > 0.5 ? 1 : -1) * 140, walls().l + 120, walls().r - 120);
+    const anchor = v(ax, ceilAt(ax));
+    const hand = fig.solved ? fig.solved.aR.E : v(fig.x, fig.y - 80);
+    yield* tween(0.25, (t) => { fig.shot = { from: hand, to: anchor, t }; });
+    const from = snapshot();
+    const rope = { ax: anchor.x, ay: anchor.y, len: 230, ang: Math.atan2(fig.x - anchor.x, 230) * 0.8, vel: 0, grip: "hand" };
+    fig.shot = null;
+    fig.rope = rope;
+    fig.blendFrom = from;
+    fig.surface = "line";
+    yield* tween(0.7, (t) => { fig.blend = t; });
+    fig.blend = 1;
+    rope.vel = 0.9 * Math.sign(fig.x - anchor.x || 1);
+    yield* wait(1.5);
+  }
+
+  // Ceiling → hanging upside-down on a line that pays out.
+  function* dropLine() {
+    const from = snapshot();
+    fig.rope = { ax: fig.x, ay: ceilAt(fig.x), len: 30, ang: 0, vel: 0.2, grip: "feet" };
+    fig.blendFrom = from;
+    fig.surface = "line";
+    yield* tween(0.6, (t) => { fig.blend = t; });
+    const target = rand(200, 340);
+    yield* tween(2.2, (t) => { fig.rope.len = lerp(30, target, ease(t)); });
+  }
+
+  function* climbUp() {
+    const r = fig.rope;
+    const start = r.len;
+    yield* tween(1.8, (t) => { r.len = lerp(start, 36, ease(t)); r.vel *= 0.9; });
+    const from = snapshot();
+    const th = Math.random() > 0.5 ? Math.PI / 2 : -Math.PI / 2;
+    const to = v(r.ax, ceilAt(r.ax) + OFF);
+    fig.rope = null;
+    fig.surface = "ceiling";
+    yield* tween(0.5, (t) => {
+      const e = ease(t);
+      fig.x = lerp(from.x, to.x, e); fig.y = lerp(from.y, to.y, e); fig.th = lerpAngle(from.th, th, e);
+    });
+  }
+
+  function* lineToGround() {
+    const r = fig.rope;
+    if (r.grip === "hand") yield* flipGrip();
+    const start = r.len;
+    const target = GROUND - r.ay - 200;
+    yield* tween(2.4, (t) => { r.len = lerp(start, target, ease(t)); r.vel *= 0.97; });
+    const from = snapshot();
+    fig.rope = null;
+    yield* hop(from, v(from.x, GROUND - STAND), 0.6, 30);
+    yield* land();
+  }
+
+  function* flipGrip() {
+    const r = fig.rope;
+    const from = snapshot();
+    r.grip = r.grip === "feet" ? "hand" : "feet";
+    fig.blendFrom = from;
+    fig.blend = 0;
+    yield* tween(0.8, (t) => { fig.blend = t; });
+    fig.blend = 1;
+  }
+
+  function* pump(seconds, dir, amp) {
+    const r = fig.rope;
+    let t = 0;
+    while (t < seconds) {
+      const dt = yield;
+      t += dt;
+      // Pump like a kid on a swing: push along the motion until the amplitude is reached.
+      if (Math.abs(r.ang) < amp) r.vel += (Math.sign(r.vel) || dir) * 1.5 * dt;
+    }
+  }
+
+  function* bigSwing() {
+    yield* pump(4, 1, 0.9);
+    yield* wait(2);
+  }
+
+  function* swingToWall() {
+    const side = nearestWall();
+    const dir = side === "wallL" ? -1 : 1;
+    const r = fig.rope;
+    yield* pump(3, dir, 1.0);
+    // release at the top of a swing toward the wall
+    let waited = 0;
+    while (!(Math.sign(r.ang) === dir && Math.abs(r.vel) < 0.25) && waited < 6) waited += yield;
+    const from = snapshot();
+    fig.rope = null;
+    const y = clamp(fig.y, ceilAt(fig.x) + 180, GROUND - 260);
+    const dist = Math.abs(wallX(side) - fig.x);
+    yield* hop(from, v(wallX(side), y), clamp(dist / 900, 0.45, 1.3), 60);
+    fig.surface = side;
+    yield* wait(0.4);
+  }
+
+  /** Swing across in arcs to x (used for crossing monitors). */
+  function* webTravel(toX) {
+    if (fig.surface !== "line") {
+      if (fig.surface === "ceiling") yield* dropLine();
+      else yield* zipUp();
+    }
+    if (fig.rope.grip === "feet") yield* flipGrip();
+    let r = fig.rope;
+    const hops = Math.max(1, Math.ceil(Math.abs(toX - fig.x) / 700));
+    const startX = ropeGrip(r).x;
+    for (let i = 1; i <= hops; i++) {
+      const Gp = ropeGrip(r);
+      const nextX = lerp(startX, toX, i / hops);
+      const ax = (Gp.x + nextX) / 2;
+      const ay = Math.min(ceilAt(ax), ceilAt(Gp.x));
+      const L = Math.hypot(Gp.x - ax, Gp.y - ay);
+      const a0 = Math.atan2(Gp.x - ax, Gp.y - ay);
+      const a1 = -a0;
+      const from = snapshot();
+      fig.rope = r = { ax, ay, len: L, ang: a0, vel: 0, grip: "hand" };
+      fig.blendFrom = from;
+      fig.blend = 0;
+      yield* tween(0.15, (t) => { fig.blend = t; });
+      yield* tween(1.1, (t) => { r.ang = lerp(a0, a1, (1 - Math.cos(Math.PI * t)) / 2); });
+      r.vel = (a1 - a0) * 0.6;
+    }
+    yield* wait(1);
+  }
+
+  function* crossMonitor() {
+    const other = monOf(fig.x) === 0 ? 1 : 0;
+    const m = MONS[other];
+    const toX = m.x + m.w / 2 + rand(-300, 300);
+    const roam = opt.roam;
+    opt.roam = true; // the inner edge is passable while he travels
+    yield* webTravel(toX);
+    opt.roam = roam;
+  }
+
+  function* idleCrouch() {
+    yield* tween(0.3, (t) => { fig.crouch = t; fig.y = GROUND - lerp(STAND, 60, t); });
+    yield* wait(rand(2, 4));
+    yield* tween(0.4, (t) => { fig.crouch = 1 - t; fig.y = GROUND - lerp(60, STAND, t); });
+  }
+
+  const MOVES = {
+    walk:        { label: "Walk on ground", from: ["ground"], make: () => walkTo(rand(walls().l + 150, walls().r - 150)) },
+    crouch:      { label: "Spidey crouch", from: ["ground"], make: idleCrouch },
+    groundWall:  { label: "Run & leap onto wall", from: ["ground"], make: groundToWall },
+    zip:         { label: "Web-zip up", from: ["ground", "wallL", "wallR"], make: zipUp },
+    wallCrawl:   { label: "Crawl on wall", from: ["wallL", "wallR"], make: () => crawlWall(rand(ceilAt(fig.x) + 150, GROUND - 200)) },
+    wallCeil:    { label: "Wall → ceiling", from: ["wallL", "wallR"], make: wallToCeiling },
+    wallGround:  { label: "Wall → ground", from: ["wallL", "wallR"], make: wallToGround },
+    ceilCrawl:   { label: "Crawl on ceiling", from: ["ceiling"], make: () => crawlCeiling(rand(walls().l + 150, walls().r - 150)) },
+    ceilWall:    { label: "Ceiling → wall", from: ["ceiling"], make: ceilingToWall },
+    drop:        { label: "Drop on a line", from: ["ceiling"], make: dropLine },
+    climb:       { label: "Climb line → ceiling", from: ["line"], make: climbUp },
+    lower:       { label: "Lower to ground", from: ["line"], make: lineToGround },
+    swing:       { label: "Big swing", from: ["line"], make: bigSwing },
+    swingWall:   { label: "Swing → wall", from: ["line"], make: swingToWall },
+    flip:        { label: "Flip grip (feet/hand)", from: ["line"], make: flipGrip },
+    cross:       { label: "Send to other monitor", from: ["ground", "wallL", "wallR", "ceiling", "line"], make: crossMonitor },
+  };
+
+  const WEIGHTS = {
+    line: { climb: 2, lower: 2, swing: 2, swingWall: 2, flip: 1, cross: 1 },
+    ceiling: { ceilCrawl: 3, drop: 3, ceilWall: 2, cross: 1 },
+    wallL: { wallCrawl: 3, wallCeil: 2, wallGround: 2, zip: 1 },
+    wallR: { wallCrawl: 3, wallCeil: 2, wallGround: 2, zip: 1 },
+    ground: { walk: 3, groundWall: 2, zip: 3, crouch: 1, cross: 1 },
+  };
+
+  function start(id, reason = "") {
+    const m = MOVES[id];
+    job = { id, label: m.label, it: m.make() };
+    job.it.next();
+    log(`${m.label}${reason ? " · " + reason : ""}`);
+  }
+
+  function pickMove() {
+    const w = { ...(WEIGHTS[fig.surface] || {}) };
+    if (!opt.roam) delete w.cross;
+    const entries = Object.entries(w);
+    let total = entries.reduce((s, [, k]) => s + k, 0);
+    let r = Math.random() * total;
+    for (const [id, k] of entries) { if ((r -= k) <= 0) return id; }
+    return entries[0]?.[0];
+  }
+
+  function scheduleNext() {
+    const [a, b] = ACTIVITY[opt.activity];
+    nextIn = rand(a, b) / opt.waitScale;
+  }
+
+  // ——— Dragging ———
+  const drag = { active: false, anchor: v(0, 0), prevVel: v(0, 0), vel: v(0, 0) };
+
+  function hitBox() {
+    if (!fig.solved) return null;
+    const pts = [fig.J.Hd, fig.J.P, fig.J.C];
+    for (const k in fig.solved) pts.push(fig.solved[k].M, fig.solved[k].E);
+    const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
+    const pad = 18;
+    return { x: Math.min(...xs) - pad, y: Math.min(...ys) - pad, w: Math.max(...xs) - Math.min(...xs) + pad * 2, h: Math.max(...ys) - Math.min(...ys) + pad * 2 };
+  }
+
+  function beginDrag(p) {
+    const b = hitBox();
+    if (!b || p.x < b.x || p.x > b.x + b.w || p.y < b.y || p.y > b.y + b.h) return false;
+    job = null;
+    fig.shot = null;
+    fig.moving = false;
+    fig.crouch = 0;
+    const from = snapshot();
+    fig.rope = { ax: p.x, ay: p.y, len: 55, ang: 0, vel: 0, grip: "hand" };
+    fig.blendFrom = from;
+    fig.blend = 0;
+    fig.surface = "drag";
+    drag.active = true;
+    drag.anchor = p;
+    drag.vel = v(0, 0);
+    log("Picked up by you");
+    return true;
+  }
+
+  function moveDrag(p, dt) {
+    const nv = mul(sub(p, drag.anchor), 1 / Math.max(dt, 1 / 120));
+    drag.vel = v(lerp(drag.vel.x, nv.x, 0.5), lerp(drag.vel.y, nv.y, 0.5));
+    drag.anchor = v(clamp(p.x, 70, W - 70), clamp(p.y, 0, GROUND - 120));
+  }
+
+  function endDrag() {
+    if (!drag.active) return;
+    drag.active = false;
+    const r = fig.rope;
+    const tangential = v(Math.cos(r.ang) * r.vel * r.len, -Math.sin(r.ang) * r.vel * r.len);
+    fig.vx = drag.vel.x * 0.6 + tangential.x;
+    fig.vy = drag.vel.y * 0.6 + tangential.y;
+    fig.rope = null;
+    const w = walls();
+    // Stick to whatever he's dropped next to.
+    if (fig.y - ceilAt(fig.x) < 170) {
+      job = { id: "stick", label: "Stick to ceiling", it: settleTo("ceiling") };
+    } else if (fig.x - w.l < 140) {
+      job = { id: "stick", label: "Stick to wall", it: settleTo("wallL") };
+    } else if (w.r - fig.x < 140) {
+      job = { id: "stick", label: "Stick to wall", it: settleTo("wallR") };
+    } else {
+      job = { id: "fall", label: "Fall & land", it: fall() };
+    }
+    job.it.next();
+    log(`Released → ${job.label}`);
+  }
+
+  function* settleTo(surface) {
+    const from = snapshot();
+    const w = walls();
+    let to, th;
+    if (surface === "ceiling") { to = v(clamp(fig.x, w.l + 80, w.r - 80), ceilAt(fig.x) + OFF); th = fig.vx >= 0 ? Math.PI / 2 : -Math.PI / 2; }
+    else { to = v(wallX(surface), clamp(fig.y, ceilAt(fig.x) + 120, GROUND - 200)); th = 0; }
+    fig.surface = "air";
+    yield* tween(0.35, (t) => {
+      const e = ease(t);
+      fig.x = lerp(from.x, to.x, e); fig.y = lerp(from.y, to.y, e); fig.th = lerpAngle(from.th, th, e);
+    });
+    fig.surface = surface;
+  }
+
+  function* fall() {
+    fig.surface = "air";
+    while (true) {
+      const dt = yield;
+      fig.vy += G * dt;
+      fig.x += fig.vx * dt;
+      fig.y += fig.vy * dt;
+      fig.th = lerpAngle(fig.th, 0, Math.min(1, dt * 5));
+      const w = walls();
+      if (fig.x < w.l + 60) { fig.x = w.l + 60; fig.vx = Math.abs(fig.vx) * 0.3; }
+      if (fig.x > w.r - 60) { fig.x = w.r - 60; fig.vx = -Math.abs(fig.vx) * 0.3; }
+      if (fig.y >= GROUND - STAND) { fig.y = GROUND - STAND; break; }
+    }
+    yield* land();
+  }
+
+  // ——— Main loop ———
+  function update(dt) {
+    time += dt;
+
+    if (drag.active && fig.rope) {
+      const r = fig.rope;
+      r.ax = drag.anchor.x; r.ay = drag.anchor.y;
+      const accX = (drag.vel.x - drag.prevVel.x) / Math.max(dt, 1e-3);
+      drag.prevVel = drag.vel;
+      ropePhysics(r, dt, -(clamp(accX, -8000, 8000) / r.len) * Math.cos(r.ang));
+      if (fig.blend < 1) fig.blend = Math.min(1, fig.blend + dt / 0.25);
+    } else if (fig.surface === "line" && fig.rope) {
+      const wind = Math.sin(time * 0.7) * 0.25 + Math.sin(time * 1.9) * 0.1;
+      ropePhysics(fig.rope, dt, wind);
+    }
+
+    if (job) {
+      const r = job.it.next(dt);
+      if (r.done) { job = null; scheduleNext(); }
+    } else if (!drag.active) {
+      nextIn -= dt;
+      if (nextIn <= 0) {
+        const id = pickMove();
+        if (id) start(id, "auto");
+      }
+    }
+
+    // passive idle motion
+    fig.look = Math.sin(time * 0.37) * 0.6 + Math.sin(time * 1.3) * 0.2;
+    if (!job && fig.surface === "ground" && fig.crouch === 0) fig.y = GROUND - STAND + Math.sin(time * 2.2) * 1.2;
+
+    solvePose();
+  }
+
+  // ——— Drawing ———
+  const world = document.getElementById("world");
+  const close = document.getElementById("closeup");
+  const wctx = world.getContext("2d");
+  const cctx = close.getContext("2d");
+  let camC = v(fig.x, fig.y);
+
+  function drawDesktop(ctx) {
+    for (const [i, m] of MONS.entries()) {
+      const g = ctx.createLinearGradient(m.x, 0, m.x + m.w, H);
+      g.addColorStop(0, i ? "#1b2030" : "#1d1a2b");
+      g.addColorStop(1, i ? "#10131c" : "#121019");
+      ctx.fillStyle = g;
+      ctx.fillRect(m.x, 0, m.w, H);
+      // mock app windows — the stuff he must not block
+      ctx.fillStyle = "rgba(255,255,255,0.035)";
+      ctx.strokeStyle = "rgba(255,255,255,0.08)";
+      ctx.lineWidth = 2;
+      const wins = i ? [[m.x + 160, 140, 980, 640], [m.x + 1240, 380, 560, 520]] : [[m.x + 200, 120, 1100, 700], [m.x + 1000, 520, 760, 440]];
+      for (const [x, y, w, h] of wins) {
+        ctx.fillRect(x, y, w, h); ctx.strokeRect(x, y, w, h);
+        ctx.fillStyle = "rgba(255,255,255,0.06)"; ctx.fillRect(x, y, w, 34); ctx.fillStyle = "rgba(255,255,255,0.035)";
+      }
+      if (m.top) {
+        ctx.fillStyle = "#0a0a0d"; ctx.fillRect(m.x, 0, m.w, m.top);
+        ctx.fillStyle = "#c8ccd6"; ctx.font = "16px sans-serif"; ctx.fillText("Activities", m.x + 14, 19); ctx.fillText("Mon 09:41", m.x + m.w / 2 - 40, 19);
+      }
+      if (m.left) {
+        ctx.fillStyle = "rgba(10,10,14,0.92)"; ctx.fillRect(m.x, m.top, m.left, H - m.top);
+        for (let k = 0; k < 7; k++) { ctx.fillStyle = ["#e95420", "#3daee9", "#77216f", "#2ec27e", "#f6d32d", "#9a9996", "#62a0ea"][k]; ctx.beginPath(); ctx.roundRect(m.x + 10, m.top + 20 + k * 58, 40, 40, 9); ctx.fill(); }
+      }
+      ctx.fillStyle = "rgba(255,255,255,0.18)"; ctx.font = "bold 46px sans-serif"; ctx.fillText(`Monitor ${m.name}`, m.x + m.w - 420, H - 40);
+    }
+    // surfaces
+    const w = { l: 59, r: W };
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = "#3de0ff";
+    ctx.beginPath(); ctx.moveTo(59, 27 + 3); ctx.lineTo(1920, 27 + 3); ctx.moveTo(1920, 3); ctx.lineTo(W, 3); ctx.stroke();
+    ctx.strokeStyle = "#e8a317";
+    ctx.beginPath(); ctx.moveTo(59, H - 3); ctx.lineTo(W, H - 3); ctx.stroke();
+    ctx.strokeStyle = "#ff3d8b";
+    ctx.beginPath(); ctx.moveTo(w.l + 3, 27); ctx.lineTo(w.l + 3, H); ctx.moveTo(w.r - 3, 0); ctx.lineTo(w.r - 3, H); ctx.stroke();
+    // inner edge
+    ctx.strokeStyle = opt.roam ? "rgba(139,147,163,0.8)" : "#ff3d8b";
+    ctx.setLineDash(opt.roam ? [24, 18] : []);
+    ctx.lineWidth = opt.roam ? 4 : 6;
+    ctx.beginPath(); ctx.moveTo(1920, 0); ctx.lineTo(1920, H); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  function drawWebNet(ctx, ax, ay) {
+    ctx.save();
+    ctx.strokeStyle = "rgba(230,236,245,0.75)";
+    ctx.lineWidth = 1.4;
+    const spokes = 9, depth = 60;
+    const hub = v(ax, ay + depth);
+    const pts = [];
+    for (let i = 0; i < spokes; i++) {
+      const a = -1.15 + (2.3 * i) / (spokes - 1);
+      pts.push(v(ax + Math.tan(a) * depth, ay));
+    }
+    ctx.beginPath();
+    for (const p of pts) { ctx.moveTo(hub.x, hub.y); ctx.lineTo(p.x, p.y); }
+    for (let k = 1; k <= 5; k++) {
+      const t = 0.2 + k * 0.14;
+      pts.forEach((p, i) => {
+        const q = v(lerp(hub.x, p.x, t), lerp(hub.y, p.y, t));
+        if (i === 0) ctx.moveTo(q.x, q.y); else ctx.lineTo(q.x, q.y + 2);
+      });
+    }
+    ctx.stroke();
+    ctx.restore();
+    return hub;
+  }
+
+  function drawRope(ctx) {
+    const r = fig.rope;
+    if (r) {
+      let from = v(r.ax, r.ay);
+      if (fig.surface === "line" && r.ay <= ceilAt(r.ax) + 1) from = drawWebNet(ctx, r.ax, r.ay);
+      const Gp = ropeGrip(r);
+      ctx.strokeStyle = "#e9eef5";
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(from.x, from.y); ctx.lineTo(Gp.x, Gp.y); ctx.stroke();
+      if (fig.surface === "drag") { ctx.fillStyle = "#e9eef5"; ctx.beginPath(); ctx.arc(r.ax, r.ay, 6, 0, Math.PI * 2); ctx.fill(); }
+    }
+    if (fig.shot) {
+      const { from, to, t } = fig.shot;
+      ctx.strokeStyle = "#e9eef5"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(from.x, from.y); ctx.lineTo(lerp(from.x, to.x, t), lerp(from.y, to.y, t)); ctx.stroke();
+    }
+  }
+
+  function drawFigure(ctx) {
+    const J = fig.J, S = fig.solved;
+    if (!J || !S) return;
+    const seg = (a, b, w, col = "#0d0e13") => {
+      ctx.lineCap = "round";
+      ctx.strokeStyle = "#56627e"; ctx.lineWidth = w + 3;
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      ctx.strokeStyle = col; ctx.lineWidth = w;
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    };
+    for (const k of ["lL", "lR"]) {
+      seg(S[k].A, S[k].M, 15); seg(S[k].M, S[k].E, 12);
+      ctx.fillStyle = "#d8121b"; ctx.beginPath(); ctx.arc(S[k].E.x, S[k].E.y, 8, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#f1f1ee"; ctx.beginPath(); ctx.arc(S[k].E.x, S[k].E.y, 3.5, 0, Math.PI * 2); ctx.fill();
+    }
+    seg(J.P, J.C, 30);
+    seg(J.shL, J.shR, 18);
+    // spider emblem
+    const e = add(J.P, mul(J.up, R.spine * 0.72));
+    ctx.strokeStyle = "#e10600"; ctx.lineWidth = 3;
+    ctx.beginPath();
+    for (const s of [-1, 1]) for (const k of [-1, 0.2, 1]) {
+      ctx.moveTo(e.x, e.y);
+      const d = add(mul(J.right, s * 11), mul(J.up, k * 7));
+      ctx.lineTo(e.x + d.x, e.y + d.y);
+    }
+    ctx.stroke();
+    ctx.fillStyle = "#e10600"; ctx.beginPath(); ctx.arc(e.x, e.y, 4, 0, Math.PI * 2); ctx.fill();
+    for (const k of ["aL", "aR"]) {
+      seg(S[k].A, S[k].M, 11); seg(S[k].M, S[k].E, 9);
+      ctx.fillStyle = "#e10600"; ctx.beginPath(); ctx.arc(S[k].E.x, S[k].E.y, 7, 0, Math.PI * 2); ctx.fill();
+    }
+    // head + lenses
+    seg(J.C, add(J.C, mul(J.up, R.neck)), 10);
+    ctx.fillStyle = "#0d0e13"; ctx.strokeStyle = "#56627e"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(J.Hd.x, J.Hd.y, R.head + 2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    for (const s of [-1, 1]) {
+      const c = add(add(J.Hd, mul(J.right, s * 7 + fig.look * 2)), mul(J.up, 1));
+      ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(fig.th + s * 0.25);
+      ctx.fillStyle = "#f4f7fb"; ctx.strokeStyle = "#e10600"; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.ellipse(0, 0, 5.5, 7.5, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  function drawHit(ctx, scale) {
+    if (!opt.hit) return;
+    const b = hitBox();
+    if (!b) return;
+    ctx.save();
+    ctx.setLineDash([10 / scale * 0.35, 8 / scale * 0.35]);
+    ctx.strokeStyle = "rgba(232,163,23,0.9)";
+    ctx.lineWidth = 1.6 / scale;
+    ctx.strokeRect(b.x, b.y, b.w, b.h);
+    ctx.restore();
+  }
+
+  function drawScene(ctx, scale) {
+    drawDesktop(ctx);
+    drawRope(ctx);
+    drawFigure(ctx);
+    drawHit(ctx, scale);
+  }
+
+  let wScale = 1;
+  function render() {
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    // overview
+    const cw = world.clientWidth;
+    const chh = Math.round((cw * H) / W);
+    if (world.width !== Math.round(cw * dpr)) { world.width = Math.round(cw * dpr); world.height = Math.round(chh * dpr); world.style.height = chh + "px"; }
+    wScale = cw / W;
+    wctx.setTransform(dpr * wScale, 0, 0, dpr * wScale, 0, 0);
+    drawScene(wctx, wScale);
+    if (job) {
+      wctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      wctx.fillStyle = "rgba(0,0,0,0.55)"; wctx.fillRect(8, 8, 260, 24);
+      wctx.fillStyle = "#fff"; wctx.font = "12px ui-monospace, monospace"; wctx.fillText("▶ " + job.label, 14, 24);
+    }
+    // close-up camera follows him at 1:1
+    const size = close.clientWidth;
+    if (close.width !== Math.round(size * dpr)) { close.width = close.height = Math.round(size * dpr); }
+    // Follow smoothly, but jump on big moves so he never leaves the frame.
+    const k = len(sub(v(fig.x, fig.y), camC)) > 400 ? 1 : 0.15;
+    camC = v(lerp(camC.x, fig.x, k), lerp(camC.y, fig.y, k));
+    const cs = (size / 380) * 0.95;
+    cctx.setTransform(1, 0, 0, 1, 0, 0);
+    cctx.fillStyle = "#05060a"; cctx.fillRect(0, 0, close.width, close.height);
+    cctx.setTransform(dpr * cs, 0, 0, dpr * cs, dpr * size / 2 - dpr * cs * camC.x, dpr * size / 2 - dpr * cs * camC.y);
+    drawScene(cctx, cs);
+  }
+
+  // ——— UI ———
+  const movesEl = document.getElementById("moves");
+  const btns = {};
+  const rnd = document.createElement("button");
+  rnd.className = "primary";
+  rnd.textContent = "Random big move now";
+  rnd.addEventListener("click", () => { if (!drag.active) { const id = pickMove(); if (id) start(id, "manual"); } });
+  movesEl.appendChild(rnd);
+  for (const [id, m] of Object.entries(MOVES)) {
+    const b = document.createElement("button");
+    b.textContent = m.label;
+    b.addEventListener("click", () => { if (!drag.active && !job) start(id, "manual"); });
+    movesEl.appendChild(b);
+    btns[id] = b;
+  }
+
+  const logEl = document.getElementById("log");
+  function log(text) {
+    const li = document.createElement("li");
+    const t = Math.floor(time);
+    li.textContent = `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}  ${text}`;
+    logEl.prepend(li);
+    while (logEl.children.length > 40) logEl.lastChild.remove();
+  }
+
+  const stState = document.getElementById("st-state");
+  const stDoing = document.getElementById("st-doing");
+  const stMon = document.getElementById("st-mon");
+  const stNext = document.getElementById("st-next");
+  const NAMES = { line: "hanging on line", ceiling: "on ceiling", wallL: "on left wall", wallR: "on right wall", ground: "on ground", air: "in the air", drag: "held by cursor" };
+  function updateUI() {
+    stState.textContent = NAMES[fig.surface] || fig.surface;
+    stDoing.textContent = job ? job.label : drag.active ? "dangling from cursor" : "idle (passive motion)";
+    stMon.textContent = MONS[monOf(fig.x)].name;
+    stNext.textContent = job || drag.active ? "after this move" : `${Math.max(0, nextIn).toFixed(1)} s (preview time)`;
+    for (const [id, b] of Object.entries(btns)) b.disabled = !!job || drag.active || !MOVES[id].from.includes(fig.surface);
+    rnd.disabled = !!job || drag.active;
+  }
+
+  document.getElementById("activity").addEventListener("change", (e) => { opt.activity = e.target.value; scheduleNext(); });
+  document.getElementById("waitscale").addEventListener("change", (e) => { opt.waitScale = +e.target.value; scheduleNext(); });
+  document.getElementById("roam").addEventListener("change", (e) => { opt.roam = e.target.checked; });
+  document.getElementById("hit").addEventListener("change", (e) => { opt.hit = e.target.checked; });
+
+  // pointer → world, for both canvases
+  function toWorld(canvas, e) {
+    const r = canvas.getBoundingClientRect();
+    const px = e.clientX - r.left, py = e.clientY - r.top;
+    if (canvas === world) return v(px / wScale, py / wScale);
+    const cs = (r.width / 380) * 0.95;
+    return v(camC.x + (px - r.width / 2) / cs, camC.y + (py - r.height / 2) / cs);
+  }
+  let dragCanvas = null;
+  let lastMove = performance.now();
+  for (const c of [world, close]) {
+    c.addEventListener("pointerdown", (e) => {
+      if (beginDrag(toWorld(c, e))) { dragCanvas = c; c.setPointerCapture(e.pointerId); c.classList.add("dragging"); lastMove = performance.now(); }
+    });
+    c.addEventListener("pointermove", (e) => {
+      if (!drag.active || dragCanvas !== c) return;
+      const now = performance.now();
+      moveDrag(toWorld(c, e), (now - lastMove) / 1000);
+      lastMove = now;
+    });
+    const up = () => { if (dragCanvas === c) { endDrag(); dragCanvas = null; c.classList.remove("dragging"); } };
+    c.addEventListener("pointerup", up);
+    c.addEventListener("pointercancel", up);
+  }
+
+  // ——— Start: hanging from the ceiling on monitor 1 ———
+  fig.rope = { ax: 1100, ay: ceilAt(1100), len: 260, ang: 0.25, vel: 0, grip: "feet" };
+  scheduleNext();
+  nextIn = 6;
+  log("Start: hanging from the ceiling");
+
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.033, (now - last) / 1000);
+    last = now;
+    update(dt);
+    render();
+    updateUI();
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  window.SpideyPreview = { fig, start, MOVES, opt, step: (n = 1, dt = 1 / 60) => { for (let i = 0; i < n; i++) update(dt); render(); updateUI(); }, get job() { return job; } };
+})();
+</script>
+</body>
+</html>
